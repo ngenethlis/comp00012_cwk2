@@ -83,6 +83,7 @@ public class ConstantFolder {
 		// Original Don't Delete
 	}
 
+	// optimize methods one by one
 	private void processMethod(Method method, ConstantPoolGen cpgen) {
 		// Modify method bytecode
 		MethodGen methodGen = new MethodGen(method, gen.getClassName(), cpgen);
@@ -115,21 +116,10 @@ public class ConstantFolder {
 			for (Iterator<InstructionHandle[]> it = finder.search(pattern); it.hasNext();) {
 				InstructionHandle[] match = it.next();
 				if (match.length == 3) {
-					InstructionHandle first = match[0];
-					InstructionHandle second = match[1];
-					InstructionHandle third = match[2];
-
-					// Try integer/float optimization first
-					if (tryOptimizeIntAndFloat(first, second, third, cpgen, il)) {
+					if (tryConstantFolding(match[0], match[1], match[2], cpgen, il)) {
 						madeChanges = true;
 						optimized = true;
 						break; // Restart the search with the modified instruction list
-					}
-					// Try long/double optimization next
-					else if (tryOptimizeLongAndDouble(first, second, third, cpgen, il)) {
-						madeChanges = true;
-						optimized = true;
-						break;
 					}
 				}
 			}
@@ -137,138 +127,121 @@ public class ConstantFolder {
 		return optimized;
 	}
 
-	private boolean tryOptimizeIntAndFloat(InstructionHandle first, InstructionHandle second,
+	private boolean tryConstantFolding(InstructionHandle first, InstructionHandle second,
 			InstructionHandle third, ConstantPoolGen cpgen, InstructionList il) {
 		Instruction inst1 = first.getInstruction();
 		Instruction inst2 = second.getInstruction();
 		Instruction inst3 = third.getInstruction();
 
-		if (!(inst1 instanceof LDC && inst2 instanceof LDC && inst3 instanceof ArithmeticInstruction)) {
-			return false;
-		}
-
-		LDC ldc1 = (LDC) inst1;
-		LDC ldc2 = (LDC) inst2;
-		Object value1 = ldc1.getValue(cpgen);
-		Object value2 = ldc2.getValue(cpgen);
-
-		if (!(value1 instanceof Number && value2 instanceof Number)) {
-			return false;
-		}
-		Number num1 = (Number) value1;
-		Number num2 = (Number) value2;
 		Number result = null;
-
-		// Integer operations
-		if (inst3 instanceof IADD) {
-			result = num1.intValue() + num2.intValue();
-		} else if (inst3 instanceof ISUB) {
-			result = num1.intValue() - num2.intValue();
-		} else if (inst3 instanceof IMUL) {
-			result = num1.intValue() * num2.intValue();
-		} else if (inst3 instanceof IDIV && num2.intValue() != 0) {
-			result = num1.intValue() / num2.intValue();
-		} else if (inst3 instanceof IREM && num2.intValue() != 0) {
-			result = num1.intValue() % num2.intValue();
-		}
-		// Float operations
-		else if (inst3 instanceof FADD) {
-			result = num1.floatValue() + num2.floatValue();
-		} else if (inst3 instanceof FSUB) {
-			result = num1.floatValue() - num2.floatValue();
-		} else if (inst3 instanceof FMUL) {
-			result = num1.floatValue() * num2.floatValue();
-		} else if (inst3 instanceof FDIV && num2.floatValue() != 0) {
-			result = num1.floatValue() / num2.floatValue();
-		} else if (inst3 instanceof FREM && num2.floatValue() != 0) {
-			result = num1.floatValue() % num2.floatValue();
-		}
-
-		if (result == null) {
-			return false;
-		}
-
-		Instruction newInst;
+		Instruction newInst = null;
 		int index;
-		// Add new constant to the constant pool and create a new LDC instruction
-		if (result instanceof Integer) {
-			index = cpgen.addInteger(result.intValue());
-			newInst = new LDC(index);
-		} else if (result instanceof Float) {
-			index = cpgen.addFloat(result.floatValue());
-			newInst = new LDC(index);
-		} else {
-			return false;
+
+		// Check for int/float constant folding (using LDC)
+		if (inst1 instanceof LDC && inst2 instanceof LDC && inst3 instanceof ArithmeticInstruction) {
+			LDC ldc1 = (LDC) inst1;
+			LDC ldc2 = (LDC) inst2;
+			Object value1 = ldc1.getValue(cpgen);
+			Object value2 = ldc2.getValue(cpgen);
+
+			if (!(value1 instanceof Number && value2 instanceof Number)) {
+				return false;
+			}
+			Number num1 = (Number) value1;
+			Number num2 = (Number) value2;
+
+			// Integer operations
+			if (inst3 instanceof IADD) {
+				result = num1.intValue() + num2.intValue();
+			} else if (inst3 instanceof ISUB) {
+				result = num1.intValue() - num2.intValue();
+			} else if (inst3 instanceof IMUL) {
+				result = num1.intValue() * num2.intValue();
+			} else if (inst3 instanceof IDIV && num2.intValue() != 0) {
+				result = num1.intValue() / num2.intValue();
+			} else if (inst3 instanceof IREM && num2.intValue() != 0) {
+				result = num1.intValue() % num2.intValue();
+			}
+			// Float operations
+			else if (inst3 instanceof FADD) {
+				result = num1.floatValue() + num2.floatValue();
+			} else if (inst3 instanceof FSUB) {
+				result = num1.floatValue() - num2.floatValue();
+			} else if (inst3 instanceof FMUL) {
+				result = num1.floatValue() * num2.floatValue();
+			} else if (inst3 instanceof FDIV && num2.floatValue() != 0) {
+				result = num1.floatValue() / num2.floatValue();
+			} else if (inst3 instanceof FREM && num2.floatValue() != 0) {
+				result = num1.floatValue() % num2.floatValue();
+			}
+
+			if (result == null) {
+				return false;
+			}
+
+			// Create new LDC instruction for int or float constant folding
+			if (result instanceof Integer) {
+				index = cpgen.addInteger(result.intValue());
+				newInst = new LDC(index);
+			} else if (result instanceof Float) {
+				index = cpgen.addFloat(result.floatValue());
+				newInst = new LDC(index);
+			} else {
+				return false;
+			}
 		}
+		// Check for long/double constant folding (using LDC2_W)
+		else if (inst1 instanceof LDC2_W && inst2 instanceof LDC2_W && inst3 instanceof ArithmeticInstruction) {
+			LDC2_W ldc1 = (LDC2_W) inst1;
+			LDC2_W ldc2 = (LDC2_W) inst2;
+			Object value1 = ldc1.getValue(cpgen);
+			Object value2 = ldc2.getValue(cpgen);
 
-		try {
-			il.insert(first, newInst);
-			il.delete(first, third);
-		} catch (TargetLostException e) {
-			return false;
-		}
-		return true;
-	}
+			if (!(value1 instanceof Number && value2 instanceof Number)) {
+				return false;
+			}
+			Number num1 = (Number) value1;
+			Number num2 = (Number) value2;
 
-	private boolean tryOptimizeLongAndDouble(InstructionHandle first, InstructionHandle second,
-			InstructionHandle third, ConstantPoolGen cpgen, InstructionList il) {
-		Instruction inst1 = first.getInstruction();
-		Instruction inst2 = second.getInstruction();
-		Instruction inst3 = third.getInstruction();
+			// Long operations
+			if (inst3 instanceof LADD) {
+				result = num1.longValue() + num2.longValue();
+			} else if (inst3 instanceof LSUB) {
+				result = num1.longValue() - num2.longValue();
+			} else if (inst3 instanceof LMUL) {
+				result = num1.longValue() * num2.longValue();
+			} else if (inst3 instanceof LDIV && num2.longValue() != 0) {
+				result = num1.longValue() / num2.longValue();
+			} else if (inst3 instanceof LREM && num2.longValue() != 0) {
+				result = num1.longValue() % num2.longValue();
+			}
+			// Double operations
+			else if (inst3 instanceof DADD) {
+				result = num1.doubleValue() + num2.doubleValue();
+			} else if (inst3 instanceof DSUB) {
+				result = num1.doubleValue() - num2.doubleValue();
+			} else if (inst3 instanceof DMUL) {
+				result = num1.doubleValue() * num2.doubleValue();
+			} else if (inst3 instanceof DDIV && num2.doubleValue() != 0) {
+				result = num1.doubleValue() / num2.doubleValue();
+			} else if (inst3 instanceof DREM && num2.doubleValue() != 0) {
+				result = num1.doubleValue() % num2.doubleValue();
+			}
 
-		if (!(inst1 instanceof LDC2_W && inst2 instanceof LDC2_W && inst3 instanceof ArithmeticInstruction)) {
-			return false;
-		}
+			if (result == null) {
+				return false;
+			}
 
-		LDC2_W ldc1 = (LDC2_W) inst1;
-		LDC2_W ldc2 = (LDC2_W) inst2;
-		Object value1 = ldc1.getValue(cpgen);
-		Object value2 = ldc2.getValue(cpgen);
-
-		if (!(value1 instanceof Number && value2 instanceof Number)) {
-			return false;
-		}
-		Number num1 = (Number) value1;
-		Number num2 = (Number) value2;
-		Number result = null;
-
-		// Long operations
-		if (inst3 instanceof LADD) {
-			result = num1.longValue() + num2.longValue();
-		} else if (inst3 instanceof LSUB) {
-			result = num1.longValue() - num2.longValue();
-		} else if (inst3 instanceof LMUL) {
-			result = num1.longValue() * num2.longValue();
-		} else if (inst3 instanceof LDIV && num2.longValue() != 0) {
-			result = num1.longValue() / num2.longValue();
-		} else if (inst3 instanceof LREM && num2.longValue() != 0) {
-			result = num1.longValue() % num2.longValue();
-		}
-		// Double operations
-		else if (inst3 instanceof DADD) {
-			result = num1.doubleValue() + num2.doubleValue();
-		} else if (inst3 instanceof DSUB) {
-			result = num1.doubleValue() - num2.doubleValue();
-		} else if (inst3 instanceof DMUL) {
-			result = num1.doubleValue() * num2.doubleValue();
-		} else if (inst3 instanceof DDIV && num2.doubleValue() != 0) {
-			result = num1.doubleValue() / num2.doubleValue();
-		} else if (inst3 instanceof DREM && num2.doubleValue() != 0) {
-			result = num1.doubleValue() % num2.doubleValue();
-		}
-
-		if (result == null) {
-			return false;
-		}
-
-		Instruction newInst;
-		int index;
-		if (result instanceof Long) {
-			index = cpgen.addLong(result.longValue());
-			newInst = new LDC2_W(index);
-		} else if (result instanceof Double) {
-			index = cpgen.addDouble(result.doubleValue());
-			newInst = new LDC2_W(index);
+			// Create new LDC2_W instruction for long or double constant folding
+			if (result instanceof Long) {
+				index = cpgen.addLong(result.longValue());
+				newInst = new LDC2_W(index);
+			} else if (result instanceof Double) {
+				index = cpgen.addDouble(result.doubleValue());
+				newInst = new LDC2_W(index);
+			} else {
+				return false;
+			}
 		} else {
 			return false;
 		}
