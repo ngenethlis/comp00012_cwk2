@@ -1,0 +1,447 @@
+Buildfile: /home/ngen/ucl/y3/COMP0012_Compilers/cw2/build.xml
+
+compile.source:
+    [mkdir] Created dir: /home/ngen/ucl/y3/COMP0012_Compilers/cw2/build/classes
+    [javac] Compiling 4 source files to /home/ngen/ucl/y3/COMP0012_Compilers/cw2/build/classes
+     [copy] Copying 1 file to /home/ngen/ucl/y3/COMP0012_Compilers/cw2/build/classes
+
+generate:
+     [java] Generated: /home/ngen/ucl/y3/COMP0012_Compilers/cw2/build/classes/comp0012/target/SimpleFolding.class
+
+optimise:
+     [echo] Running constant folding optimisation...
+    [mkdir] Created dir: /home/ngen/ucl/y3/COMP0012_Compilers/cw2/optimised/classes
+     [java] Running COMP207p courswork-2
+     [java] === Processing method: <init> ===
+     [java] Before Optimization:
+     [java] aload_0[42](1)
+     [java] invokespecial[183](3) 17
+     [java] return[177](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] aload_0[42](1)
+     [java] invokespecial[183](3) 17
+     [java] return[177](1)
+     [java] No modifications applied to method <init>
+     [java] === Processing method: simple ===
+     [java] Before Optimization:
+     [java] getstatic[178](3) 12
+     [java] ldc[18](2) 24
+     [java] ldc[18](2) 8
+     [java] iadd[96](1)
+     [java] invokevirtual[182](3) 7
+     [java] return[177](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] Constant folding applied.
+     [java] After Optimization:
+     [java] getstatic[178](3) 12
+     [java] ldc[18](2) 27
+     [java] invokevirtual[182](3) 7
+     [java] return[177](1)
+     [java] Method simple replaced with optimized version.
+     [java] === Processing method: <init> ===
+     [java] Before Optimization:
+     [java] aload_0[42](1)
+     [java] invokespecial[183](3) 1
+     [java] return[177](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] aload_0[42](1)
+     [java] invokespecial[183](3) 1
+     [java] return[177](1)
+     [java] No modifications applied to method <init>
+     [java] === Processing method: methodOne ===
+     [java] Before Optimization:
+     [java] bipush[16](2) 42
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] sipush[17](3) 764
+     [java] iadd[96](1)
+     [java] iconst_3[6](1)
+     [java] imul[104](1)
+     [java] istore_2[61](1)
+     [java] iload_2[28](1)
+     [java] bipush[16](2) 67
+     [java] isub[100](1)
+     [java] istore_1[60](1)
+     [java] iload_2[28](1)
+     [java] sipush[17](3) 1234
+     [java] iadd[96](1)
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] ireturn[172](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] bipush[16](2) 42
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] sipush[17](3) 764
+     [java] iadd[96](1)
+     [java] iconst_3[6](1)
+     [java] imul[104](1)
+     [java] istore_2[61](1)
+     [java] iload_2[28](1)
+     [java] bipush[16](2) 67
+     [java] isub[100](1)
+     [java] istore_1[60](1)
+     [java] iload_2[28](1)
+     [java] sipush[17](3) 1234
+     [java] iadd[96](1)
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] ireturn[172](1)
+     [java] No modifications applied to method methodOne
+     [java] === Processing method: methodTwo ===
+     [java] Before Optimization:
+     [java] sipush[17](3) 12345
+     [java] istore_1[60](1)
+     [java] ldc[18](2) 7
+     [java] istore_2[61](1)
+     [java] getstatic[178](3) 8
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] if_icmpge[162](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> invokevirtual 14
+     [java] iconst_0[3](1)
+     [java] invokevirtual[182](3) 14
+     [java] iconst_0[3](1)
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] if_icmple[164](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> ireturn
+     [java] iconst_0[3](1)
+     [java] ireturn[172](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] sipush[17](3) 12345
+     [java] istore_1[60](1)
+     [java] ldc[18](2) 7
+     [java] istore_2[61](1)
+     [java] getstatic[178](3) 8
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] if_icmpge[162](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> invokevirtual 14
+     [java] iconst_0[3](1)
+     [java] invokevirtual[182](3) 14
+     [java] iconst_0[3](1)
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] if_icmple[164](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> ireturn
+     [java] iconst_0[3](1)
+     [java] ireturn[172](1)
+     [java] No modifications applied to method methodTwo
+     [java] === Processing method: methodThree ===
+     [java] Before Optimization:
+     [java] iconst_0[3](1)
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] iconst_3[6](1)
+     [java] iadd[96](1)
+     [java] istore_2[61](1)
+     [java] iload_2[28](1)
+     [java] iconst_4[7](1)
+     [java] iadd[96](1)
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] iconst_5[8](1)
+     [java] iadd[96](1)
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] imul[104](1)
+     [java] ireturn[172](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] iconst_0[3](1)
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] iconst_3[6](1)
+     [java] iadd[96](1)
+     [java] istore_2[61](1)
+     [java] iload_2[28](1)
+     [java] iconst_4[7](1)
+     [java] iadd[96](1)
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] iconst_5[8](1)
+     [java] iadd[96](1)
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] imul[104](1)
+     [java] ireturn[172](1)
+     [java] No modifications applied to method methodThree
+     [java] === Processing method: methodFour ===
+     [java] Before Optimization:
+     [java] ldc[18](2) 20
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] sipush[17](3) 1234
+     [java] isub[100](1)
+     [java] istore_2[61](1)
+     [java] getstatic[178](3) 8
+     [java] ldc[18](2) 21
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] i2d[135](1)
+     [java] ldc2_w[20](3) 22
+     [java] dmul[107](1)
+     [java] invokevirtual[182](3) 24
+     [java] iconst_0[3](1)
+     [java] istore_3[62](1)
+     [java] iload_3[29](1)
+     [java] bipush[16](2) 10
+     [java] if_icmpge[162](3) -> iconst_4
+     [java] getstatic[178](3) 8
+     [java] iload_2[28](1)
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] iload_3[29](1)
+     [java] imul[104](1)
+     [java] invokevirtual[182](3) 27
+     [java] iinc[132](3) 3 1
+     [java] goto[167](3) -> iload_3
+     [java] iconst_4[7](1)
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] iconst_2[5](1)
+     [java] iadd[96](1)
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] imul[104](1)
+     [java] ireturn[172](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] ldc[18](2) 20
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] sipush[17](3) 1234
+     [java] isub[100](1)
+     [java] istore_2[61](1)
+     [java] getstatic[178](3) 8
+     [java] ldc[18](2) 21
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] i2d[135](1)
+     [java] ldc2_w[20](3) 22
+     [java] dmul[107](1)
+     [java] invokevirtual[182](3) 24
+     [java] iconst_0[3](1)
+     [java] istore_3[62](1)
+     [java] iload_3[29](1)
+     [java] bipush[16](2) 10
+     [java] if_icmpge[162](3) -> iconst_4
+     [java] getstatic[178](3) 8
+     [java] iload_2[28](1)
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] iload_3[29](1)
+     [java] imul[104](1)
+     [java] invokevirtual[182](3) 27
+     [java] iinc[132](3) 3 1
+     [java] goto[167](3) -> iload_3
+     [java] iconst_4[7](1)
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] iconst_2[5](1)
+     [java] iadd[96](1)
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] imul[104](1)
+     [java] ireturn[172](1)
+     [java] No modifications applied to method methodFour
+     [java] === Processing method: <init> ===
+     [java] Before Optimization:
+     [java] aload_0[42](1)
+     [java] invokespecial[183](3) 1
+     [java] return[177](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] aload_0[42](1)
+     [java] invokespecial[183](3) 1
+     [java] return[177](1)
+     [java] No modifications applied to method <init>
+     [java] === Processing method: methodOne ===
+     [java] Before Optimization:
+     [java] bipush[16](2) 62
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] sipush[17](3) 764
+     [java] iadd[96](1)
+     [java] iconst_3[6](1)
+     [java] imul[104](1)
+     [java] istore_2[61](1)
+     [java] iload_2[28](1)
+     [java] sipush[17](3) 1234
+     [java] iadd[96](1)
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] ireturn[172](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] bipush[16](2) 62
+     [java] istore_1[60](1)
+     [java] iload_1[27](1)
+     [java] sipush[17](3) 764
+     [java] iadd[96](1)
+     [java] iconst_3[6](1)
+     [java] imul[104](1)
+     [java] istore_2[61](1)
+     [java] iload_2[28](1)
+     [java] sipush[17](3) 1234
+     [java] iadd[96](1)
+     [java] iload_1[27](1)
+     [java] isub[100](1)
+     [java] ireturn[172](1)
+     [java] No modifications applied to method methodOne
+     [java] === Processing method: methodTwo ===
+     [java] Before Optimization:
+     [java] ldc2_w[20](3) 7
+     [java] dstore_1[72](1)
+     [java] iconst_1[4](1)
+     [java] istore_3[62](1)
+     [java] dload_1[39](1)
+     [java] iload_3[29](1)
+     [java] i2d[135](1)
+     [java] dadd[99](1)
+     [java] dreturn[175](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] ldc2_w[20](3) 7
+     [java] dstore_1[72](1)
+     [java] iconst_1[4](1)
+     [java] istore_3[62](1)
+     [java] dload_1[39](1)
+     [java] iload_3[29](1)
+     [java] i2d[135](1)
+     [java] dadd[99](1)
+     [java] dreturn[175](1)
+     [java] No modifications applied to method methodTwo
+     [java] === Processing method: methodThree ===
+     [java] Before Optimization:
+     [java] sipush[17](3) 12345
+     [java] istore_1[60](1)
+     [java] ldc[18](2) 9
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] if_icmple[164](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> ireturn
+     [java] iconst_0[3](1)
+     [java] ireturn[172](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] sipush[17](3) 12345
+     [java] istore_1[60](1)
+     [java] ldc[18](2) 9
+     [java] istore_2[61](1)
+     [java] iload_1[27](1)
+     [java] iload_2[28](1)
+     [java] if_icmple[164](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> ireturn
+     [java] iconst_0[3](1)
+     [java] ireturn[172](1)
+     [java] No modifications applied to method methodThree
+     [java] === Processing method: methodFour ===
+     [java] Before Optimization:
+     [java] ldc2_w[20](3) 10
+     [java] lstore_1[64](1)
+     [java] ldc2_w[20](3) 12
+     [java] lstore_3[66](1)
+     [java] lload_1[31](1)
+     [java] lload_3[33](1)
+     [java] ladd[97](1)
+     [java] lstore[55](2) 5
+     [java] lload_1[31](1)
+     [java] lload_3[33](1)
+     [java] lcmp[148](1)
+     [java] ifle[158](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> ireturn
+     [java] iconst_0[3](1)
+     [java] ireturn[172](1)
+     [java] Detected constant variables: {}
+     [java] No constant variable loads were replaced.
+     [java] No constant folding opportunities found.
+     [java] After Optimization:
+     [java] ldc2_w[20](3) 10
+     [java] lstore_1[64](1)
+     [java] ldc2_w[20](3) 12
+     [java] lstore_3[66](1)
+     [java] lload_1[31](1)
+     [java] lload_3[33](1)
+     [java] ladd[97](1)
+     [java] lstore[55](2) 5
+     [java] lload_1[31](1)
+     [java] lload_3[33](1)
+     [java] lcmp[148](1)
+     [java] ifle[158](3) -> iconst_0
+     [java] iconst_1[4](1)
+     [java] goto[167](3) -> ireturn
+     [java] iconst_0[3](1)
+     [java] ireturn[172](1)
+     [java] No modifications applied to method methodFour
+
+compile.tests:
+    [mkdir] Created dir: /home/ngen/ucl/y3/COMP0012_Compilers/cw2/build/test
+    [javac] Compiling 3 source files to /home/ngen/ucl/y3/COMP0012_Compilers/cw2/build/test
+
+compile:
+
+test.original:
+     [echo] Running unit tests for the original classes...
+    [mkdir] Created dir: /home/ngen/ucl/y3/COMP0012_Compilers/cw2/test-reports/original
+    [junit] Running comp0012.target.ConstantVariableFoldingTest
+    [junit] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 sec
+    [junit] Running comp0012.target.DynamicVariableFoldingTest
+    [junit] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 sec
+    [junit] Running comp0012.target.SimpleFoldingTest
+    [junit] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 sec
+
+test.optimised:
+     [echo] Running unit tests for the optimised classes...
+    [mkdir] Created dir: /home/ngen/ucl/y3/COMP0012_Compilers/cw2/test-reports/optimised
+    [junit] Running comp0012.target.ConstantVariableFoldingTest
+    [junit] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 sec
+    [junit] Running comp0012.target.DynamicVariableFoldingTest
+    [junit] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 sec
+    [junit] Running comp0012.target.SimpleFoldingTest
+    [junit] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 sec
+
+test:
+
+BUILD SUCCESSFUL
+Total time: 2 seconds

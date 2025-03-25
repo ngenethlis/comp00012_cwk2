@@ -4,12 +4,20 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.Iterator;
+import java.util.*; // import everything
 
+import org.apache.bcel.generic.*;
+import org.apache.bcel.classfile.Method;
+import org.apache.bcel.generic.InstructionList;
+import org.apache.bcel.generic.InstructionHandle;
+import org.apache.bcel.generic.ConstantPushInstruction;
+import org.apache.bcel.generic.LDC;
+import org.apache.bcel.generic.LDC2_W;
+import org.apache.bcel.generic.StoreInstruction;
+import org.apache.bcel.generic.LoadInstruction;
 import org.apache.bcel.classfile.ClassParser;
 import org.apache.bcel.classfile.Code;
 import org.apache.bcel.classfile.JavaClass;
-import org.apache.bcel.classfile.Method;
 import org.apache.bcel.generic.ArithmeticInstruction;
 import org.apache.bcel.generic.ClassGen;
 import org.apache.bcel.generic.ConstantPoolGen;
@@ -29,19 +37,27 @@ import org.apache.bcel.generic.IMUL;
 import org.apache.bcel.generic.IREM;
 import org.apache.bcel.generic.ISUB;
 import org.apache.bcel.generic.Instruction;
-import org.apache.bcel.generic.InstructionHandle;
-import org.apache.bcel.generic.InstructionList;
 import org.apache.bcel.generic.InstructionTargeter;
 import org.apache.bcel.generic.LADD;
-import org.apache.bcel.generic.LDC;
-import org.apache.bcel.generic.LDC2_W;
 import org.apache.bcel.generic.LDIV;
 import org.apache.bcel.generic.LMUL;
 import org.apache.bcel.generic.LREM;
 import org.apache.bcel.generic.LSUB;
 import org.apache.bcel.util.InstructionFinder;
+
+import org.apache.bcel.classfile.Attribute;
+import org.apache.bcel.classfile.StackMapTable;
+import java.util.ArrayList;
+import java.util.List;
+// these break it, if we dont need them remove
+//import com.sun.org.apache.bcel.internal.classfile.Constant;
+//import com.sun.org.apache.bcel.internal.generic.ConstantPushInstruction;
+
 import org.apache.bcel.generic.MethodGen;
 import org.apache.bcel.generic.TargetLostException;
+
+import java.util.HashMap;
+import java.util.Stack;
 
 public class ConstantFolder {
 	ClassParser parser = null;
@@ -49,6 +65,16 @@ public class ConstantFolder {
 
 	JavaClass original = null;
 	JavaClass optimized = null;
+
+	private ClassGen cgen;
+	private ConstantPoolGen cpgen;
+	private Stack<Number> valuesStack;
+	private Stack<InstructionHandle> loadInstructions;
+	private HashMap<Integer, Number> variables;
+	private List<InstructionHandle> loopBounds;
+
+	private HashMap<Integer, InstructionHandle[]> variableInstructions;
+	private HashMap<Integer, Boolean> variableUsed;
 
 	public ConstantFolder(String classFilePath) {
 		try {
@@ -84,20 +110,79 @@ public class ConstantFolder {
 	}
 
 	// optimize methods one by one
+
 	private void processMethod(Method method, ConstantPoolGen cpgen) {
+		ClassGen cg = new ClassGen(original);
+		cg.setMajor(50);
+		cg.setMinor(0);
 		// Modify method bytecode
 		MethodGen methodGen = new MethodGen(method, gen.getClassName(), cpgen);
-		InstructionList instructionList = methodGen.getInstructionList();
-		if (instructionList == null) {
+		InstructionList il = methodGen.getInstructionList();
+		if (il == null) {
 			return; // skip methods without instructions
 		}
-		boolean optimized = optimizeInstructions(instructionList, cpgen);
 
-		if (optimized) {
-			methodGen.setMaxStack();
-			methodGen.setMaxLocals();
-			// Replace the original with the optimized version
-			gen.replaceMethod(method, methodGen.getMethod());
+		System.out.println("=== Processing method: " + method.getName() + " ===");
+
+		// Debug: Print instructions before optimization
+		System.out.println("Before Optimization:");
+		for (InstructionHandle handle = il.getStart(); handle != null; handle = handle.getNext()) {
+			System.out.println(handle.getInstruction());
+		}
+
+		// Step 1: Identify constant variables in the method
+		Map<Integer, Number> constants = findConstantVariables(methodGen);
+		System.out.println("Detected constant variables: " + constants);
+
+		// Step 2: Replace variable loads with constant pushes.
+		boolean changed = replaceConstantVariables(il, constants, cpgen);
+		if (changed) {
+			System.out.println("Replaced constant variable loads with constant pushes.");
+		} else {
+			System.out.println("No constant variable loads were replaced.");
+		}
+
+		// Step 3: Perform constant folding on the updated instruction list.
+		boolean foldingChanged = optimizeInstructions(il, cpgen);
+		if (foldingChanged) {
+			System.out.println("Constant folding applied.");
+		} else {
+			System.out.println("No constant folding opportunities found.");
+		}
+		changed = changed || foldingChanged;
+
+		// Update positions
+		il.setPositions(true);
+
+		// Remove debugging info so that outdated stack maps are not used.
+		methodGen.removeLineNumbers();
+		methodGen.removeLocalVariables();
+
+		// Recompute max stack and locals
+		methodGen.setMaxStack();
+		methodGen.setMaxLocals();
+
+		// Get the optimized method
+		Method optimizedMethod = methodGen.getMethod();
+
+		// Remove outdated stack map attributes
+		List<Attribute> newAttrs = new ArrayList<>();
+		for (Attribute attr : optimizedMethod.getAttributes()) {
+			String attrName = attr.getName();
+			if (!attrName.equals("StackMapTable") && !attrName.equals("StackMap")) {
+				newAttrs.add(attr);
+			} else {
+				System.out.println("Removing outdated stack map attribute: " + attrName);
+			}
+		}
+		optimizedMethod.setAttributes(newAttrs.toArray(new Attribute[newAttrs.size()]));
+
+		// Replace the original method if any changes were made.
+		if (changed) {
+			gen.replaceMethod(method, optimizedMethod);
+			System.out.println("Method " + method.getName() + " replaced with optimized version.");
+		} else {
+			System.out.println("No modifications applied to method " + method.getName());
 		}
 	}
 
@@ -253,6 +338,85 @@ public class ConstantFolder {
 			return false;
 		}
 		return true;
+	}
+
+	private boolean replaceConstantVariables(InstructionList il, Map<Integer, Number> constants,
+			ConstantPoolGen cpgen) {
+		boolean modified = false;
+		// Iterate using a while-loop since InstructionList isn’t Iterable
+		for (InstructionHandle handle = il.getStart(); handle != null; handle = handle.getNext()) {
+			Instruction inst = handle.getInstruction();
+			if (inst instanceof LoadInstruction) {
+				LoadInstruction load = (LoadInstruction) inst;
+				int varIndex = load.getIndex();
+				if (constants.containsKey(varIndex)) {
+					Number value = constants.get(varIndex);
+					Instruction newInst = null;
+					int index;
+					if (value instanceof Integer) {
+						index = cpgen.addInteger(value.intValue());
+						newInst = new LDC(index);
+					} else if (value instanceof Float) {
+						index = cpgen.addFloat(value.floatValue());
+						newInst = new LDC(index);
+					} else if (value instanceof Long) {
+						index = cpgen.addLong(value.longValue());
+						newInst = new LDC2_W(index);
+					} else if (value instanceof Double) {
+						index = cpgen.addDouble(value.doubleValue());
+						newInst = new LDC2_W(index);
+					}
+					if (newInst != null) {
+						try {
+							System.out.println("Replacing load for var[" + varIndex + "] with constant push: " + value);
+							handle.setInstruction(newInst);
+							modified = true;
+						} catch (Exception e) {
+							e.printStackTrace();
+						}
+					}
+				}
+			}
+		}
+		return modified;
+	}
+
+	private Map<Integer, Number> findConstantVariables(MethodGen methodGen) {
+		Map<Integer, Number> constants = new HashMap<>();
+		Set<Integer> reassignedVars = new HashSet<>();
+		InstructionList il = methodGen.getInstructionList();
+
+		// Iterate through the instruction list
+		for (InstructionHandle handle = il.getStart(); handle != null; handle = handle.getNext()) {
+			Instruction inst = handle.getInstruction();
+			// Look for a store instruction (assignment)
+			if (inst instanceof StoreInstruction) {
+				StoreInstruction store = (StoreInstruction) inst;
+				int varIndex = store.getIndex();
+
+				// Look backwards for a constant push, skipping over trivial instructions
+				InstructionHandle prev = handle.getPrev();
+				while (prev != null &&
+						(prev.getInstruction() instanceof NOP /* || prev.getInstruction() instanceof LineNumberGen */)) {
+					// Uncomment and adjust the check for line number instructions if needed
+					prev = prev.getPrev();
+				}
+				// If we found a constant push, record the constant value
+				if (prev != null && prev.getInstruction() instanceof ConstantPushInstruction) {
+					ConstantPushInstruction push = (ConstantPushInstruction) prev.getInstruction();
+					if (!reassignedVars.contains(varIndex)) {
+						constants.put(varIndex, push.getValue());
+						System.out.println("Found constant assignment: var[" + varIndex + "] = " + push.getValue());
+					}
+				} else {
+					// Otherwise, mark the variable as not constant
+					constants.remove(varIndex);
+					reassignedVars.add(varIndex);
+					System.out.println("Variable " + varIndex + " is reassigned or not a constant.");
+				}
+			}
+		}
+		return constants;
 	}
 
 	public void write(String optimisedFilePath) {
