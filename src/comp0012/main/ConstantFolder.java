@@ -77,10 +77,13 @@ public class ConstantFolder {
 	private HashMap<Integer, Boolean> variableUsed;
 
 	public ConstantFolder(String classFilePath) {
+
 		try {
 			this.parser = new ClassParser(classFilePath);
 			this.original = this.parser.parse();
-			this.gen = new ClassGen(this.original);
+			this.gen = new ClassGen(original);
+			this.gen.setMajor(50); // java 6
+			this.gen.setMinor(0);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -109,12 +112,9 @@ public class ConstantFolder {
 		// Original Don't Delete
 	}
 
-	// optimize methods one by one
-
+	// constant variable folding and dynamic variable folding should be here
+	// probably
 	private void processMethod(Method method, ConstantPoolGen cpgen) {
-		ClassGen cg = new ClassGen(original);
-		cg.setMajor(50);
-		cg.setMinor(0);
 		// Modify method bytecode
 		MethodGen methodGen = new MethodGen(method, gen.getClassName(), cpgen);
 		InstructionList il = methodGen.getInstructionList();
@@ -130,11 +130,11 @@ public class ConstantFolder {
 			System.out.println(handle.getInstruction());
 		}
 
-		// Step 1: Identify constant variables in the method
+		// Finsd consts
 		Map<Integer, Number> constants = findConstantVariables(methodGen);
 		System.out.println("Detected constant variables: " + constants);
 
-		// Step 2: Replace variable loads with constant pushes.
+		// Replace variable loads with constant pushes.
 		boolean changed = replaceConstantVariables(il, constants, cpgen);
 		if (changed) {
 			System.out.println("Replaced constant variable loads with constant pushes.");
@@ -142,7 +142,7 @@ public class ConstantFolder {
 			System.out.println("No constant variable loads were replaced.");
 		}
 
-		// Step 3: Perform constant folding on the updated instruction list.
+		// Perform constant folding on the updated instruction list.
 		boolean foldingChanged = optimizeInstructions(il, cpgen);
 		if (foldingChanged) {
 			System.out.println("Constant folding applied.");
@@ -186,6 +186,7 @@ public class ConstantFolder {
 		}
 	}
 
+	// part 1
 	private boolean optimizeInstructions(InstructionList il, ConstantPoolGen cpgen) {
 		InstructionFinder finder = new InstructionFinder(il);
 		// Define pattern for constant arithmetic operations
