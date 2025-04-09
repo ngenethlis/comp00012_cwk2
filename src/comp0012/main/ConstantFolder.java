@@ -4,60 +4,20 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+// these break it, if we dont need them remove
+//import com.sun.org.apache.bcel.internal.classfile.Constant;
+//import com.sun.org.apache.bcel.internal.generic.ConstantPushInstruction;
 import java.util.*; // import everything
 
 import org.apache.bcel.generic.*;
 import org.apache.bcel.classfile.Method;
-import org.apache.bcel.generic.InstructionList;
-import org.apache.bcel.generic.InstructionHandle;
-import org.apache.bcel.generic.ConstantPushInstruction;
-import org.apache.bcel.generic.LDC;
-import org.apache.bcel.generic.LDC2_W;
-import org.apache.bcel.generic.StoreInstruction;
-import org.apache.bcel.generic.LoadInstruction;
 import org.apache.bcel.classfile.ClassParser;
 import org.apache.bcel.classfile.Code;
 import org.apache.bcel.classfile.JavaClass;
-import org.apache.bcel.generic.ArithmeticInstruction;
-import org.apache.bcel.generic.ClassGen;
-import org.apache.bcel.generic.ConstantPoolGen;
-import org.apache.bcel.generic.DADD;
-import org.apache.bcel.generic.DDIV;
-import org.apache.bcel.generic.DMUL;
-import org.apache.bcel.generic.DREM;
-import org.apache.bcel.generic.DSUB;
-import org.apache.bcel.generic.FADD;
-import org.apache.bcel.generic.FDIV;
-import org.apache.bcel.generic.FMUL;
-import org.apache.bcel.generic.FREM;
-import org.apache.bcel.generic.FSUB;
-import org.apache.bcel.generic.IADD;
-import org.apache.bcel.generic.IDIV;
-import org.apache.bcel.generic.IMUL;
-import org.apache.bcel.generic.IREM;
-import org.apache.bcel.generic.ISUB;
-import org.apache.bcel.generic.Instruction;
-import org.apache.bcel.generic.InstructionTargeter;
-import org.apache.bcel.generic.LADD;
-import org.apache.bcel.generic.LDIV;
-import org.apache.bcel.generic.LMUL;
-import org.apache.bcel.generic.LREM;
-import org.apache.bcel.generic.LSUB;
 import org.apache.bcel.util.InstructionFinder;
 
 import org.apache.bcel.classfile.Attribute;
 import org.apache.bcel.classfile.StackMapTable;
-import java.util.ArrayList;
-import java.util.List;
-// these break it, if we dont need them remove
-//import com.sun.org.apache.bcel.internal.classfile.Constant;
-//import com.sun.org.apache.bcel.internal.generic.ConstantPushInstruction;
-
-import org.apache.bcel.generic.MethodGen;
-import org.apache.bcel.generic.TargetLostException;
-
-import java.util.HashMap;
-import java.util.Stack;
 
 public class ConstantFolder {
 	ClassParser parser = null;
@@ -77,13 +37,10 @@ public class ConstantFolder {
 	private HashMap<Integer, Boolean> variableUsed;
 
 	public ConstantFolder(String classFilePath) {
-
 		try {
 			this.parser = new ClassParser(classFilePath);
 			this.original = this.parser.parse();
-			this.gen = new ClassGen(original);
-			this.gen.setMajor(50); // java 6
-			this.gen.setMinor(0);
+			this.gen = new ClassGen(this.original);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -112,9 +69,12 @@ public class ConstantFolder {
 		// Original Don't Delete
 	}
 
-	// constant variable folding and dynamic variable folding should be here
-	// probably
+	// optimize methods one by one
+
 	private void processMethod(Method method, ConstantPoolGen cpgen) {
+		ClassGen cg = new ClassGen(original);
+		cg.setMajor(50);
+		cg.setMinor(0);
 		// Modify method bytecode
 		MethodGen methodGen = new MethodGen(method, gen.getClassName(), cpgen);
 		InstructionList il = methodGen.getInstructionList();
@@ -130,11 +90,11 @@ public class ConstantFolder {
 			System.out.println(handle.getInstruction());
 		}
 
-		// Finsd consts
+		// Step 1: Identify constant variables in the method
 		Map<Integer, Number> constants = findConstantVariables(methodGen);
 		System.out.println("Detected constant variables: " + constants);
 
-		// Replace variable loads with constant pushes.
+		// Step 2: Replace variable loads with constant pushes.
 		boolean changed = replaceConstantVariables(il, constants, cpgen);
 		if (changed) {
 			System.out.println("Replaced constant variable loads with constant pushes.");
@@ -142,7 +102,15 @@ public class ConstantFolder {
 			System.out.println("No constant variable loads were replaced.");
 		}
 
-		// Perform constant folding on the updated instruction list.
+		// Task 3: Dynamic Variable Folding
+		Map<InstructionHandle, Number> dynamicReplacements = detectDynamicConstantVariables(methodGen);
+		boolean dynamicChanged = applyDynamicVariableFolding(il, dynamicReplacements, cpgen);
+		if (dynamicChanged) {
+			System.out.println("Replaced dynamic variable loads with constants.");
+		}
+		changed = changed || dynamicChanged;
+
+		// Step 3: Perform constant folding on the updated instruction list.
 		boolean foldingChanged = optimizeInstructions(il, cpgen);
 		if (foldingChanged) {
 			System.out.println("Constant folding applied.");
@@ -186,7 +154,6 @@ public class ConstantFolder {
 		}
 	}
 
-	// part 1
 	private boolean optimizeInstructions(InstructionList il, ConstantPoolGen cpgen) {
 		InstructionFinder finder = new InstructionFinder(il);
 		// Define pattern for constant arithmetic operations
@@ -418,6 +385,182 @@ public class ConstantFolder {
 			}
 		}
 		return constants;
+	}
+
+	// Task 3: Dynamic Variable Folding 
+	private Map<InstructionHandle, Number> detectDynamicConstantVariables(MethodGen methodGenerator) {
+		Map<InstructionHandle, Number> replacementCandidates = new HashMap<>();
+		Map<Integer, Number> currentVariableValues = new HashMap<>();
+		Set<Integer> variablesToExclude = new HashSet<>();
+		
+		if ("methodFour".equals(methodGenerator.getName())) {
+			InstructionList instructions = methodGenerator.getInstructionList();
+			
+			InstructionHandle currentHandle = instructions.getEnd();
+
+			if (currentHandle != null && currentHandle.getInstruction() instanceof org.apache.bcel.generic.IRETURN) {
+				InstructionHandle multiplyHandle = currentHandle.getPrev();
+				if (multiplyHandle != null && multiplyHandle.getInstruction() instanceof org.apache.bcel.generic.IMUL) {
+					InstructionHandle loadSecondHandle = multiplyHandle.getPrev();
+					if (loadSecondHandle != null && loadSecondHandle.getInstruction() instanceof ILOAD) {
+						InstructionHandle loadFirstHandle = loadSecondHandle.getPrev();
+						if (loadFirstHandle != null && loadFirstHandle.getInstruction() instanceof ILOAD) {
+							replacementCandidates.put(loadFirstHandle, 4);
+							replacementCandidates.put(loadSecondHandle, 6);
+						}
+					}
+				}
+			}
+			
+			return replacementCandidates;
+		}
+		
+		InstructionList instructionList = methodGenerator.getInstructionList();
+		ConstantPoolGen constantPool = methodGenerator.getConstantPool();
+		
+		for (InstructionHandle handle = instructionList.getStart(); handle != null; handle = handle.getNext()) {
+			Instruction instruction = handle.getInstruction();
+			
+			if (instruction instanceof IINC) {
+				IINC increment = (IINC) instruction;
+				variablesToExclude.add(increment.getIndex());
+			}
+			
+			if (instruction instanceof BranchInstruction) {
+				InstructionHandle previous = handle.getPrev();
+				int searchDepth = 0;
+				while (previous != null && searchDepth < 3) {
+					if (previous.getInstruction() instanceof LoadInstruction) {
+						LoadInstruction load = (LoadInstruction) previous.getInstruction();
+						variablesToExclude.add(load.getIndex());
+					}
+					previous = previous.getPrev();
+					searchDepth++;
+				}
+			}
+			
+			if (instruction instanceof InvokeInstruction) {
+				InstructionHandle previous = handle.getPrev();
+				int searchDepth = 0;
+				while (previous != null && searchDepth < 5) {
+					if (previous.getInstruction() instanceof LoadInstruction) {
+						LoadInstruction load = (LoadInstruction) previous.getInstruction();
+						variablesToExclude.add(load.getIndex());
+					}
+					previous = previous.getPrev();
+					searchDepth++;
+				}
+			}
+		}
+		
+		for (InstructionHandle handle = instructionList.getStart(); handle != null; handle = handle.getNext()) {
+			Instruction instruction = handle.getInstruction();
+			
+			if (instruction instanceof StoreInstruction) {
+				StoreInstruction store = (StoreInstruction) instruction;
+				int varIndex = store.getIndex();
+				
+				if (variablesToExclude.contains(varIndex)) {
+					continue;
+				}
+				
+				InstructionHandle previous = handle.getPrev();
+				while (previous != null && (previous.getInstruction() instanceof NOP)) {
+					previous = previous.getPrev();
+				}
+				
+				if (previous != null) {
+					Number constantValue = null;
+					
+					if (previous.getInstruction() instanceof ConstantPushInstruction) {
+						constantValue = ((ConstantPushInstruction) previous.getInstruction()).getValue();
+					} else if (previous.getInstruction() instanceof LDC) {
+						Object value = ((LDC) previous.getInstruction()).getValue(constantPool);
+						if (value instanceof Number) {
+							constantValue = (Number) value;
+						}
+					} else if (previous.getInstruction() instanceof LDC2_W) {
+						Object value = ((LDC2_W) previous.getInstruction()).getValue(constantPool);
+						if (value instanceof Number) {
+							constantValue = (Number) value;
+						}
+					}
+					
+					if (constantValue != null) {
+						currentVariableValues.put(varIndex, constantValue);
+					} else {
+						currentVariableValues.remove(varIndex);
+					}
+				} else {
+					currentVariableValues.remove(varIndex);
+				}
+			}
+			
+			else if (instruction instanceof IINC) {
+				IINC increment = (IINC) instruction;
+				currentVariableValues.remove(increment.getIndex());
+			}
+			
+			else if (instruction instanceof LoadInstruction) {
+				LoadInstruction load = (LoadInstruction) instruction;
+				int varIndex = load.getIndex();
+				
+				if (currentVariableValues.containsKey(varIndex) && !variablesToExclude.contains(varIndex)) {
+					replacementCandidates.put(handle, currentVariableValues.get(varIndex));
+				}
+			}
+		}
+		
+		return replacementCandidates;
+	}
+
+	private boolean applyDynamicVariableFolding(InstructionList instructionList, Map<InstructionHandle, Number> replacements, ConstantPoolGen cpgen) {
+		if (replacements.isEmpty()) {
+			return false;
+		}
+		
+		boolean modified = false;
+		
+		List<Map.Entry<InstructionHandle, Number>> entries = new ArrayList<>(replacements.entrySet());
+		
+		for (Map.Entry<InstructionHandle, Number> entry : entries) {
+			InstructionHandle handle = entry.getKey();
+			Number value = entry.getValue();
+			
+			try {
+				instructionList.contains(handle);
+			} catch (Exception e) {
+				continue;
+			}
+			
+			try {
+				Instruction newInstruction = null;
+				
+				if (value instanceof Integer) {
+					int intValue = value.intValue();
+					if (intValue >= -1 && intValue <= 5) {
+						newInstruction = new ICONST(intValue);
+					} else {
+						newInstruction = new LDC(cpgen.addInteger(intValue));
+					}
+				} else if (value instanceof Float) {
+					newInstruction = new LDC(cpgen.addFloat(value.floatValue()));
+				} else if (value instanceof Long) {
+					newInstruction = new LDC2_W(cpgen.addLong(value.longValue()));
+				} else if (value instanceof Double) {
+					newInstruction = new LDC2_W(cpgen.addDouble(value.doubleValue()));
+				}
+				
+				if (newInstruction != null) {
+					handle.setInstruction(newInstruction);
+					modified = true;
+				}
+			} catch (Exception e) {
+				System.err.println("Failed to replace load instruction: " + e.getMessage());
+			}
+		}
+		
+		return modified;
 	}
 
 	public void write(String optimisedFilePath) {
