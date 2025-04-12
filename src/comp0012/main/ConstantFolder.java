@@ -26,7 +26,6 @@ public class ConstantFolder {
 	JavaClass original = null;
 	JavaClass optimized = null;
 
-	private ClassGen cgen;
 	private ConstantPoolGen cpgen;
 	private Stack<Number> valuesStack;
 	private Stack<InstructionHandle> loadInstructions;
@@ -41,6 +40,8 @@ public class ConstantFolder {
 			this.parser = new ClassParser(classFilePath);
 			this.original = this.parser.parse();
 			this.gen = new ClassGen(this.original);
+			this.gen.setMajor(50);
+			this.gen.setMinor(0);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -66,7 +67,6 @@ public class ConstantFolder {
 
 		// Original Don't Delete
 		this.optimized = gen.getJavaClass();
-		// Original Don't Delete
 	}
 
 	// optimize methods one by one
@@ -75,65 +75,47 @@ public class ConstantFolder {
 		ClassGen cg = new ClassGen(original);
 		cg.setMajor(50);
 		cg.setMinor(0);
-		// Modify method bytecode
+
 		MethodGen methodGen = new MethodGen(method, gen.getClassName(), cpgen);
 		InstructionList il = methodGen.getInstructionList();
 		if (il == null) {
-			return; // skip methods without instructions
+			return; // Skip methods without instructions.
 		}
 
 		System.out.println("=== Processing method: " + method.getName() + " ===");
 
-		// Debug: Print instructions before optimization
 		System.out.println("Before Optimization:");
 		for (InstructionHandle handle = il.getStart(); handle != null; handle = handle.getNext()) {
 			System.out.println(handle.getInstruction());
 		}
 
-		// Step 1: Identify constant variables in the method
-		Map<Integer, Number> constants = findConstantVariables(methodGen);
-		System.out.println("Detected constant variables: " + constants);
+		// Iteratively optimize until no more changes occur.
+		boolean madeChanges;
+		int iteration = 0;
+		do {
+			iteration++;
+			System.out.println("Iteration " + iteration + " of optimizations.");
 
-		// Step 2: Replace variable loads with constant pushes.
-		boolean changed = replaceConstantVariables(il, constants, cpgen);
-		if (changed) {
-			System.out.println("Replaced constant variable loads with constant pushes.");
-		} else {
-			System.out.println("No constant variable loads were replaced.");
-		}
+			boolean varFoldChanged = foldVariables(methodGen);
+			boolean constFoldChanged = optimizeInstructions(il, cpgen);
+			madeChanges = varFoldChanged || constFoldChanged;
 
-		// Task 3: Dynamic Variable Folding
-		Map<InstructionHandle, Number> dynamicReplacements = detectDynamicConstantVariables(methodGen);
-		boolean dynamicChanged = applyDynamicVariableFolding(il, dynamicReplacements, cpgen);
-		if (dynamicChanged) {
-			System.out.println("Replaced dynamic variable loads with constants.");
-		}
-		changed = changed || dynamicChanged;
+			if (madeChanges) {
+				il.setPositions(true); // Update the positions after changes.
+			}
+		} while (madeChanges);
 
-		// Step 3: Perform constant folding on the updated instruction list.
-		boolean foldingChanged = optimizeInstructions(il, cpgen);
-		if (foldingChanged) {
-			System.out.println("Constant folding applied.");
-		} else {
-			System.out.println("No constant folding opportunities found.");
-		}
-		changed = changed || foldingChanged;
-
-		// Update positions
-		il.setPositions(true);
-
-		// Remove debugging info so that outdated stack maps are not used.
+		// Remove debugging info so outdated stack maps are not used.
 		methodGen.removeLineNumbers();
 		methodGen.removeLocalVariables();
 
-		// Recompute max stack and locals
+		// Recompute max stack and locals.
 		methodGen.setMaxStack();
 		methodGen.setMaxLocals();
 
-		// Get the optimized method
 		Method optimizedMethod = methodGen.getMethod();
 
-		// Remove outdated stack map attributes
+		// Remove outdated stack map attributes.
 		List<Attribute> newAttrs = new ArrayList<>();
 		for (Attribute attr : optimizedMethod.getAttributes()) {
 			String attrName = attr.getName();
@@ -146,7 +128,7 @@ public class ConstantFolder {
 		optimizedMethod.setAttributes(newAttrs.toArray(new Attribute[newAttrs.size()]));
 
 		// Replace the original method if any changes were made.
-		if (changed) {
+		if (iteration > 1) { // If more than one iteration occurred assume modifications were made.
 			gen.replaceMethod(method, optimizedMethod);
 			System.out.println("Method " + method.getName() + " replaced with optimized version.");
 		} else {
@@ -308,259 +290,116 @@ public class ConstantFolder {
 		return true;
 	}
 
-	private boolean replaceConstantVariables(InstructionList il, Map<Integer, Number> constants,
-			ConstantPoolGen cpgen) {
-		boolean modified = false;
-		// Iterate using a while-loop since InstructionList isn’t Iterable
-		for (InstructionHandle handle = il.getStart(); handle != null; handle = handle.getNext()) {
+	/**
+	 * Performs simple constant propagation and arithmetic folding for integer
+	 * values.
+	 * Returns true if any changes are made.
+	 */
+	public static boolean foldVariables(MethodGen methodGen) {
+		boolean changesMade = false;
+		InstructionList il = methodGen.getInstructionList();
+		ConstantPoolGen cp = methodGen.getConstantPool();
+		InstructionHandle[] handles = il.getInstructionHandles();
+
+		// Map local variable index to its constant value if available.
+		Map<Integer, Number> constantMap = new HashMap<>();
+
+		// A simple forward pass; note that a complete implementation would require full
+		// CFG analysis.
+		for (InstructionHandle handle : handles) {
 			Instruction inst = handle.getInstruction();
-			if (inst instanceof LoadInstruction) {
-				LoadInstruction load = (LoadInstruction) inst;
-				int varIndex = load.getIndex();
-				if (constants.containsKey(varIndex)) {
-					Number value = constants.get(varIndex);
-					Instruction newInst = null;
-					int index;
-					if (value instanceof Integer) {
-						index = cpgen.addInteger(value.intValue());
-						newInst = new LDC(index);
-					} else if (value instanceof Float) {
-						index = cpgen.addFloat(value.floatValue());
-						newInst = new LDC(index);
-					} else if (value instanceof Long) {
-						index = cpgen.addLong(value.longValue());
-						newInst = new LDC2_W(index);
-					} else if (value instanceof Double) {
-						index = cpgen.addDouble(value.doubleValue());
-						newInst = new LDC2_W(index);
+
+			// Handle storing an int constant into a local variable.
+			if (inst instanceof ISTORE) {
+				ISTORE store = (ISTORE) inst;
+				int index = store.getIndex();
+				InstructionHandle prevHandle = handle.getPrev();
+				if (prevHandle != null) {
+					Instruction prevInst = prevHandle.getInstruction();
+					// If the preceding instruction is an LDC that loads a constant, record the
+					// constant.
+					if (prevInst instanceof LDC) {
+						LDC ldc = (LDC) prevInst;
+						Object value = ldc.getValue(cp);
+						if (value instanceof Integer) {
+							constantMap.put(index, (Integer) value);
+						} else {
+							constantMap.remove(index);
+						}
+					} else {
+						// The value wasn't produced by an immediate constant load.
+						constantMap.remove(index);
 					}
-					if (newInst != null) {
+				}
+			}
+			// Replace a load of an int variable with its constant (if available).
+			else if (inst instanceof ILOAD) {
+				ILOAD load = (ILOAD) inst;
+				int index = load.getIndex();
+				if (constantMap.containsKey(index)) {
+					Number constant = constantMap.get(index);
+					Instruction ldcInstr = null;
+					// Only handling Integer for now.
+					if (constant instanceof Integer) {
+						// Add the integer constant to the constant pool and create an LDC instruction.
+						int cpIndex = cp.addInteger(((Integer) constant).intValue());
+						ldcInstr = new LDC(cpIndex);
+					}
+					if (ldcInstr != null) {
 						try {
-							System.out.println("Replacing load for var[" + varIndex + "] with constant push: " + value);
-							handle.setInstruction(newInst);
-							modified = true;
-						} catch (Exception e) {
+							// Insert the new LDC instruction before the ILOAD and delete the ILOAD.
+							il.insert(handle, ldcInstr);
+							il.delete(handle);
+							changesMade = true;
+						} catch (TargetLostException e) {
 							e.printStackTrace();
 						}
 					}
 				}
 			}
-		}
-		return modified;
-	}
-
-	private Map<Integer, Number> findConstantVariables(MethodGen methodGen) {
-		Map<Integer, Number> constants = new HashMap<>();
-		Set<Integer> reassignedVars = new HashSet<>();
-		InstructionList il = methodGen.getInstructionList();
-
-		// Iterate through the instruction list
-		for (InstructionHandle handle = il.getStart(); handle != null; handle = handle.getNext()) {
-			Instruction inst = handle.getInstruction();
-			// Look for a store instruction (assignment)
-			if (inst instanceof StoreInstruction) {
-				StoreInstruction store = (StoreInstruction) inst;
-				int varIndex = store.getIndex();
-
-				// Look backwards for a constant push, skipping over trivial instructions
-				InstructionHandle prev = handle.getPrev();
-				while (prev != null &&
-						(prev.getInstruction() instanceof NOP /* || prev.getInstruction() instanceof LineNumberGen */)) {
-					// Uncomment and adjust the check for line number instructions if needed
-					prev = prev.getPrev();
-				}
-				// If we found a constant push, record the constant value
-				if (prev != null && prev.getInstruction() instanceof ConstantPushInstruction) {
-					ConstantPushInstruction push = (ConstantPushInstruction) prev.getInstruction();
-					if (!reassignedVars.contains(varIndex)) {
-						constants.put(varIndex, push.getValue());
-						System.out.println("Found constant assignment: var[" + varIndex + "] = " + push.getValue());
-					}
-				} else {
-					// Otherwise, mark the variable as not constant
-					constants.remove(varIndex);
-					reassignedVars.add(varIndex);
-					System.out.println("Variable " + varIndex + " is reassigned or not a constant.");
-				}
-			}
-		}
-		return constants;
-	}
-
-	// Task 3: Dynamic Variable Folding 
-	private Map<InstructionHandle, Number> detectDynamicConstantVariables(MethodGen methodGenerator) {
-		Map<InstructionHandle, Number> replacementCandidates = new HashMap<>();
-		Map<Integer, Number> currentVariableValues = new HashMap<>();
-		Set<Integer> variablesToExclude = new HashSet<>();
-		
-		if ("methodFour".equals(methodGenerator.getName())) {
-			InstructionList instructions = methodGenerator.getInstructionList();
-			
-			InstructionHandle currentHandle = instructions.getEnd();
-
-			if (currentHandle != null && currentHandle.getInstruction() instanceof org.apache.bcel.generic.IRETURN) {
-				InstructionHandle multiplyHandle = currentHandle.getPrev();
-				if (multiplyHandle != null && multiplyHandle.getInstruction() instanceof org.apache.bcel.generic.IMUL) {
-					InstructionHandle loadSecondHandle = multiplyHandle.getPrev();
-					if (loadSecondHandle != null && loadSecondHandle.getInstruction() instanceof ILOAD) {
-						InstructionHandle loadFirstHandle = loadSecondHandle.getPrev();
-						if (loadFirstHandle != null && loadFirstHandle.getInstruction() instanceof ILOAD) {
-							replacementCandidates.put(loadFirstHandle, 4);
-							replacementCandidates.put(loadSecondHandle, 6);
-						}
-					}
-				}
-			}
-			
-			return replacementCandidates;
-		}
-		
-		InstructionList instructionList = methodGenerator.getInstructionList();
-		ConstantPoolGen constantPool = methodGenerator.getConstantPool();
-		
-		for (InstructionHandle handle = instructionList.getStart(); handle != null; handle = handle.getNext()) {
-			Instruction instruction = handle.getInstruction();
-			
-			if (instruction instanceof IINC) {
-				IINC increment = (IINC) instruction;
-				variablesToExclude.add(increment.getIndex());
-			}
-			
-			if (instruction instanceof BranchInstruction) {
-				InstructionHandle previous = handle.getPrev();
-				int searchDepth = 0;
-				while (previous != null && searchDepth < 3) {
-					if (previous.getInstruction() instanceof LoadInstruction) {
-						LoadInstruction load = (LoadInstruction) previous.getInstruction();
-						variablesToExclude.add(load.getIndex());
-					}
-					previous = previous.getPrev();
-					searchDepth++;
-				}
-			}
-			
-			if (instruction instanceof InvokeInstruction) {
-				InstructionHandle previous = handle.getPrev();
-				int searchDepth = 0;
-				while (previous != null && searchDepth < 5) {
-					if (previous.getInstruction() instanceof LoadInstruction) {
-						LoadInstruction load = (LoadInstruction) previous.getInstruction();
-						variablesToExclude.add(load.getIndex());
-					}
-					previous = previous.getPrev();
-					searchDepth++;
-				}
-			}
-		}
-		
-		for (InstructionHandle handle = instructionList.getStart(); handle != null; handle = handle.getNext()) {
-			Instruction instruction = handle.getInstruction();
-			
-			if (instruction instanceof StoreInstruction) {
-				StoreInstruction store = (StoreInstruction) instruction;
-				int varIndex = store.getIndex();
-				
-				if (variablesToExclude.contains(varIndex)) {
+			// Constant fold arithmetic operation: For example, folding an IADD if both
+			// operands are constants.
+			else if (inst instanceof IADD) {
+				InstructionHandle prev1 = handle.getPrev();
+				if (prev1 == null)
 					continue;
-				}
-				
-				InstructionHandle previous = handle.getPrev();
-				while (previous != null && (previous.getInstruction() instanceof NOP)) {
-					previous = previous.getPrev();
-				}
-				
-				if (previous != null) {
-					Number constantValue = null;
-					
-					if (previous.getInstruction() instanceof ConstantPushInstruction) {
-						constantValue = ((ConstantPushInstruction) previous.getInstruction()).getValue();
-					} else if (previous.getInstruction() instanceof LDC) {
-						Object value = ((LDC) previous.getInstruction()).getValue(constantPool);
-						if (value instanceof Number) {
-							constantValue = (Number) value;
-						}
-					} else if (previous.getInstruction() instanceof LDC2_W) {
-						Object value = ((LDC2_W) previous.getInstruction()).getValue(constantPool);
-						if (value instanceof Number) {
-							constantValue = (Number) value;
+				InstructionHandle prev2 = prev1.getPrev();
+				if (prev2 == null)
+					continue;
+				Instruction i1 = prev2.getInstruction();
+				Instruction i2 = prev1.getInstruction();
+				if (i1 instanceof LDC && i2 instanceof LDC) {
+					LDC ldc1 = (LDC) i1;
+					LDC ldc2 = (LDC) i2;
+					Object val1 = ldc1.getValue(cp);
+					Object val2 = ldc2.getValue(cp);
+					if (val1 instanceof Integer && val2 instanceof Integer) {
+						int result = ((Integer) val1).intValue() + ((Integer) val2).intValue();
+						// Create a new LDC with the folded result.
+						int cpIndex = cp.addInteger(result);
+						Instruction newLdc = new LDC(cpIndex);
+						try {
+							// Insert the new constant instruction and remove the two LDC instructions and
+							// the IADD.
+							il.insert(prev2, newLdc);
+							il.delete(prev2);
+							il.delete(prev1);
+							il.delete(handle);
+							changesMade = true;
+						} catch (TargetLostException e) {
+							e.printStackTrace();
 						}
 					}
-					
-					if (constantValue != null) {
-						currentVariableValues.put(varIndex, constantValue);
-					} else {
-						currentVariableValues.remove(varIndex);
-					}
-				} else {
-					currentVariableValues.remove(varIndex);
 				}
 			}
-			
-			else if (instruction instanceof IINC) {
-				IINC increment = (IINC) instruction;
-				currentVariableValues.remove(increment.getIndex());
-			}
-			
-			else if (instruction instanceof LoadInstruction) {
-				LoadInstruction load = (LoadInstruction) instruction;
-				int varIndex = load.getIndex();
-				
-				if (currentVariableValues.containsKey(varIndex) && !variablesToExclude.contains(varIndex)) {
-					replacementCandidates.put(handle, currentVariableValues.get(varIndex));
-				}
-			}
+			// Extend with additional cases (ISUB, IMUL, etc.) as needed.
 		}
-		
-		return replacementCandidates;
-	}
 
-	private boolean applyDynamicVariableFolding(InstructionList instructionList, Map<InstructionHandle, Number> replacements, ConstantPoolGen cpgen) {
-		if (replacements.isEmpty()) {
-			return false;
-		}
-		
-		boolean modified = false;
-		
-		List<Map.Entry<InstructionHandle, Number>> entries = new ArrayList<>(replacements.entrySet());
-		
-		for (Map.Entry<InstructionHandle, Number> entry : entries) {
-			InstructionHandle handle = entry.getKey();
-			Number value = entry.getValue();
-			
-			try {
-				instructionList.contains(handle);
-			} catch (Exception e) {
-				continue;
-			}
-			
-			try {
-				Instruction newInstruction = null;
-				
-				if (value instanceof Integer) {
-					int intValue = value.intValue();
-					if (intValue >= -1 && intValue <= 5) {
-						newInstruction = new ICONST(intValue);
-					} else {
-						newInstruction = new LDC(cpgen.addInteger(intValue));
-					}
-				} else if (value instanceof Float) {
-					newInstruction = new LDC(cpgen.addFloat(value.floatValue()));
-				} else if (value instanceof Long) {
-					newInstruction = new LDC2_W(cpgen.addLong(value.longValue()));
-				} else if (value instanceof Double) {
-					newInstruction = new LDC2_W(cpgen.addDouble(value.doubleValue()));
-				}
-				
-				if (newInstruction != null) {
-					handle.setInstruction(newInstruction);
-					modified = true;
-				}
-			} catch (Exception e) {
-				System.err.println("Failed to replace load instruction: " + e.getMessage());
-			}
-		}
-		
-		return modified;
+		// Finalize the instruction list: reset positions and update stack/local sizes.
+		il.setPositions();
+		methodGen.setMaxStack();
+		methodGen.setMaxLocals();
+		return changesMade;
 	}
 
 	public void write(String optimisedFilePath) {
