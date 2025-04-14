@@ -93,8 +93,8 @@ public class ConstantFolder {
 			iteration++;
 			System.out.println("Iteration " + iteration + " of optimizations.");
 
-			boolean varFoldChanged = foldConstantVariables(methodGen);
 			boolean constFoldChanged = optimizeInstructions(il, cpgen);
+			boolean varFoldChanged = foldConstantVariables(methodGen) || foldDynamicVariables(methodGen);
 			madeChanges = varFoldChanged || constFoldChanged;
 
 			if (madeChanges) {
@@ -318,7 +318,69 @@ public class ConstantFolder {
 		return changed;
 	}
 
-	// ------------------ Helper Methods ------------------
+	public boolean foldDynamicVariables(MethodGen mg) {
+		InstructionList il = mg.getInstructionList();
+		ConstantPoolGen cpgen = mg.getConstantPool();
+
+		if (il == null)
+			return false;
+
+		boolean changed = false;
+		// This map holds the current constant value of each variable (if known) for its
+		// current interval.
+		Map<Integer, ConstantInfo> currentConstants = new HashMap<>();
+		InstructionHandle[] handles = il.getInstructionHandles();
+
+		// Process the instruction list sequentially.
+		for (int i = 0; i < handles.length; i++) {
+			InstructionHandle handle = handles[i];
+			Instruction inst = handle.getInstruction();
+
+			// Detect store instructions and update the mapping.
+			if (inst instanceof StoreInstruction) {
+				int varIndex = ((StoreInstruction) inst).getIndex();
+				// Check if there is a constant push immediately before the store.
+				if (i > 0) {
+					Instruction prevInst = handles[i - 1].getInstruction();
+					ConstantInfo info = extractConstantInfo(prevInst, cpgen);
+					if (info != null) {
+						// Constant assignment found: set new constant for the variable.
+						currentConstants.put(varIndex, info);
+					} else {
+						// If the store is not assigned using a constant push, clear any previous
+						// constant.
+						currentConstants.remove(varIndex);
+					}
+				} else {
+					// No previous instruction? Clear any mapping.
+					currentConstants.remove(varIndex);
+				}
+			}
+			// Process load instructions and propagate the dynamic constant if present.
+			else if (inst instanceof LoadInstruction) {
+				int varIndex = ((LoadInstruction) inst).getIndex();
+				if (currentConstants.containsKey(varIndex)) {
+					Instruction replacement = createConstantLoad(currentConstants.get(varIndex), cpgen);
+					if (replacement != null) {
+						handle.setInstruction(replacement);
+						changed = true;
+					}
+				}
+			}
+		}
+
+		if (changed) {
+			il.setPositions();
+			mg.setInstructionList(il);
+			mg.setMaxStack();
+			mg.setMaxLocals();
+			Method updatedMethod = mg.getMethod();
+		}
+
+		return changed;
+	}
+
+	// ================== Helper Methods ==================
 
 	private void identifyConstantAssignments(InstructionHandle[] handles, ConstantPoolGen cpgen,
 			Map<Integer, ConstantInfo> assignments, Set<Integer> reassigns) {
@@ -340,40 +402,6 @@ public class ConstantFolder {
 				assignments.put(index, constInfo);
 			}
 		}
-	}
-
-	private ConstantInfo extractConstantInfo(Instruction inst, ConstantPoolGen cpgen) {
-		Number value = null;
-		Type type = null;
-
-		if (inst instanceof LDC) {
-			Object val = ((LDC) inst).getValue(cpgen);
-			if (val instanceof Integer) {
-				value = (Integer) val;
-				type = Type.INT;
-			} else if (val instanceof Float) {
-				value = (Float) val;
-				type = Type.FLOAT;
-			}
-		} else if (inst instanceof LDC2_W) {
-			Object val = ((LDC2_W) inst).getValue(cpgen);
-			if (val instanceof Double) {
-				value = (Double) val;
-				type = Type.DOUBLE;
-			} else if (val instanceof Long) {
-				value = (Long) val;
-				type = Type.LONG;
-			}
-		} else if (inst instanceof ConstantPushInstruction) {
-			value = ((ConstantPushInstruction) inst).getValue();
-			if (value instanceof Integer) {
-				type = Type.INT;
-			} else if (value instanceof Float) {
-				type = Type.FLOAT;
-			}
-		}
-
-		return (value != null && type != null) ? new ConstantInfo(value, type) : null;
 	}
 
 	private void removeReassignedVariables(Map<Integer, ConstantInfo> assignments, Set<Integer> reassigns) {
@@ -403,21 +431,6 @@ public class ConstantFolder {
 		}
 
 		return changed;
-	}
-
-	private Instruction createConstantLoad(ConstantInfo constInfo, ConstantPoolGen cpgen) {
-		switch (constInfo.type.toString()) {
-			case "int":
-				return new LDC(cpgen.addInteger(constInfo.value.intValue()));
-			case "float":
-				return new LDC(cpgen.addFloat(constInfo.value.floatValue()));
-			case "double":
-				return new LDC2_W(cpgen.addDouble(constInfo.value.doubleValue()));
-			case "long":
-				return new LDC2_W(cpgen.addLong(constInfo.value.longValue()));
-			default:
-				return null;
-		}
 	}
 
 	private boolean removeUnusedAssignments(InstructionList il, Map<Integer, ConstantInfo> assignments) {
@@ -463,21 +476,68 @@ public class ConstantFolder {
 		return false;
 	}
 
-	// ------------------ Helper Class ------------------
+	/* ----------------- Helper Methods ----------------- */
 
-	class ConstantInfo {
-		public Number value;
-		public Type type;
+	/**
+	 * Extracts constant information from an instruction if it is a constant push.
+	 * This method recognizes:
+	 * - LDC
+	 * - LDC2_W
+	 * - ConstantPushInstruction
+	 *
+	 * Returns a ConstantInfo or null if the instruction does not push a constant.
+	 */
+	private ConstantInfo extractConstantInfo(Instruction inst, ConstantPoolGen cpgen) {
+		Number value = null;
+		Type type = null;
 
-		public ConstantInfo(Number value, Type type) {
-			this.value = value;
-			this.type = type;
+		if (inst instanceof LDC) {
+			Object val = ((LDC) inst).getValue(cpgen);
+			if (val instanceof Integer) {
+				value = (Integer) val;
+				type = Type.INT;
+			} else if (val instanceof Float) {
+				value = (Float) val;
+				type = Type.FLOAT;
+			}
+		} else if (inst instanceof LDC2_W) {
+			Object val = ((LDC2_W) inst).getValue(cpgen);
+			if (val instanceof Double) {
+				value = (Double) val;
+				type = Type.DOUBLE;
+			} else if (val instanceof Long) {
+				value = (Long) val;
+				type = Type.LONG;
+			}
+		} else if (inst instanceof ConstantPushInstruction) {
+			value = ((ConstantPushInstruction) inst).getValue();
+			if (value instanceof Integer) {
+				type = Type.INT;
+			} else if (value instanceof Float) {
+				type = Type.FLOAT;
+			}
 		}
 
-		@Override
-		public String toString() {
-			return "{number: " + value + ", type: " + type + "}";
+		return (value != null && type != null) ? new ConstantInfo(value, type) : null;
+	}
+
+	/**
+	 * Creates an instruction that loads the constant based on the type in the
+	 * ConstantInfo.
+	 */
+	private Instruction createConstantLoad(ConstantInfo constInfo, ConstantPoolGen cpgen) {
+		// Using toString() of Type is one way to compare.
+		// Alternatively, compare with Type.INT, etc., if your Type class supports it.
+		if (constInfo.type.equals(Type.INT)) {
+			return new LDC(cpgen.addInteger(constInfo.value.intValue()));
+		} else if (constInfo.type.equals(Type.FLOAT)) {
+			return new LDC(cpgen.addFloat(constInfo.value.floatValue()));
+		} else if (constInfo.type.equals(Type.DOUBLE)) {
+			return new LDC2_W(cpgen.addDouble(constInfo.value.doubleValue()));
+		} else if (constInfo.type.equals(Type.LONG)) {
+			return new LDC2_W(cpgen.addLong(constInfo.value.longValue()));
 		}
+		return null;
 	}
 
 	public void write(String optimisedFilePath) {
@@ -492,6 +552,26 @@ public class ConstantFolder {
 		} catch (IOException e) {
 			// Auto-generated catch block
 			e.printStackTrace();
+		}
+	}
+
+	// ============== Helper Class ================
+
+	/*
+	 * Helper class to hold a constant value and its type.
+	 */
+	class ConstantInfo {
+		public Number value;
+		public Type type;
+
+		public ConstantInfo(Number value, Type type) {
+			this.value = value;
+			this.type = type;
+		}
+
+		@Override
+		public String toString() {
+			return "{number: " + value + ", type: " + type + "}";
 		}
 	}
 }
