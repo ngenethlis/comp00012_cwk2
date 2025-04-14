@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.*; // import everything
 
 import org.apache.bcel.generic.*;
+import org.apache.bcel.classfile.LocalVariableTable;
 import org.apache.bcel.classfile.Method;
 import org.apache.bcel.classfile.ClassParser;
 import org.apache.bcel.classfile.Code;
@@ -18,6 +19,8 @@ import org.apache.bcel.util.InstructionFinder;
 
 import org.apache.bcel.classfile.Attribute;
 import org.apache.bcel.classfile.StackMapTable;
+
+import org.apache.bcel.generic.InstructionFactory;
 
 public class ConstantFolder {
 	ClassParser parser = null;
@@ -82,13 +85,7 @@ public class ConstantFolder {
 			return; // Skip methods without instructions.
 		}
 
-		System.out.println("=== Processing method: " + method.getName() + " ===");
-
-		System.out.println("Before Optimization:");
-		for (InstructionHandle handle = il.getStart(); handle != null; handle = handle.getNext()) {
-			System.out.println(handle.getInstruction());
-		}
-
+		System.out.println("=== Processing method: " + method.getName() + " from class " + gen.getClassName() + "===");
 		// Iteratively optimize until no more changes occur.
 		boolean madeChanges;
 		int iteration = 0;
@@ -96,7 +93,7 @@ public class ConstantFolder {
 			iteration++;
 			System.out.println("Iteration " + iteration + " of optimizations.");
 
-			boolean varFoldChanged = foldVariables(methodGen);
+			boolean varFoldChanged = foldConstantVariables(methodGen);
 			boolean constFoldChanged = optimizeInstructions(il, cpgen);
 			madeChanges = varFoldChanged || constFoldChanged;
 
@@ -290,116 +287,197 @@ public class ConstantFolder {
 		return true;
 	}
 
-	/**
-	 * Performs simple constant propagation and arithmetic folding for integer
-	 * values.
-	 * Returns true if any changes are made.
-	 */
-	public static boolean foldVariables(MethodGen methodGen) {
-		boolean changesMade = false;
-		InstructionList il = methodGen.getInstructionList();
-		ConstantPoolGen cp = methodGen.getConstantPool();
+	public boolean foldConstantVariables(MethodGen mg) {
+		InstructionList il = mg.getInstructionList();
+		ConstantPoolGen cpgen = mg.getConstantPool();
+		if (il == null)
+			return false;
+
+		boolean changed = false;
 		InstructionHandle[] handles = il.getInstructionHandles();
+		Map<Integer, ConstantInfo> constantAssignments = new HashMap<>();
+		Set<Integer> reassignedVariables = new HashSet<>();
 
-		// Map local variable index to its constant value if available.
-		Map<Integer, Number> constantMap = new HashMap<>();
+		identifyConstantAssignments(handles, cpgen, constantAssignments, reassignedVariables);
+		removeReassignedVariables(constantAssignments, reassignedVariables);
 
-		// A simple forward pass; note that a complete implementation would require full
-		// CFG analysis.
-		for (InstructionHandle handle : handles) {
-			Instruction inst = handle.getInstruction();
-
-			// Handle storing an int constant into a local variable.
-			if (inst instanceof ISTORE) {
-				ISTORE store = (ISTORE) inst;
-				int index = store.getIndex();
-				InstructionHandle prevHandle = handle.getPrev();
-				if (prevHandle != null) {
-					Instruction prevInst = prevHandle.getInstruction();
-					// If the preceding instruction is an LDC that loads a constant, record the
-					// constant.
-					if (prevInst instanceof LDC) {
-						LDC ldc = (LDC) prevInst;
-						Object value = ldc.getValue(cp);
-						if (value instanceof Integer) {
-							constantMap.put(index, (Integer) value);
-						} else {
-							constantMap.remove(index);
-						}
-					} else {
-						// The value wasn't produced by an immediate constant load.
-						constantMap.remove(index);
-					}
-				}
-			}
-			// Replace a load of an int variable with its constant (if available).
-			else if (inst instanceof ILOAD) {
-				ILOAD load = (ILOAD) inst;
-				int index = load.getIndex();
-				if (constantMap.containsKey(index)) {
-					Number constant = constantMap.get(index);
-					Instruction ldcInstr = null;
-					// Only handling Integer for now.
-					if (constant instanceof Integer) {
-						// Add the integer constant to the constant pool and create an LDC instruction.
-						int cpIndex = cp.addInteger(((Integer) constant).intValue());
-						ldcInstr = new LDC(cpIndex);
-					}
-					if (ldcInstr != null) {
-						try {
-							// Insert the new LDC instruction before the ILOAD and delete the ILOAD.
-							il.insert(handle, ldcInstr);
-							il.delete(handle);
-							changesMade = true;
-						} catch (TargetLostException e) {
-							e.printStackTrace();
-						}
-					}
-				}
-			}
-			// Constant fold arithmetic operation: For example, folding an IADD if both
-			// operands are constants.
-			else if (inst instanceof IADD) {
-				InstructionHandle prev1 = handle.getPrev();
-				if (prev1 == null)
-					continue;
-				InstructionHandle prev2 = prev1.getPrev();
-				if (prev2 == null)
-					continue;
-				Instruction i1 = prev2.getInstruction();
-				Instruction i2 = prev1.getInstruction();
-				if (i1 instanceof LDC && i2 instanceof LDC) {
-					LDC ldc1 = (LDC) i1;
-					LDC ldc2 = (LDC) i2;
-					Object val1 = ldc1.getValue(cp);
-					Object val2 = ldc2.getValue(cp);
-					if (val1 instanceof Integer && val2 instanceof Integer) {
-						int result = ((Integer) val1).intValue() + ((Integer) val2).intValue();
-						// Create a new LDC with the folded result.
-						int cpIndex = cp.addInteger(result);
-						Instruction newLdc = new LDC(cpIndex);
-						try {
-							// Insert the new constant instruction and remove the two LDC instructions and
-							// the IADD.
-							il.insert(prev2, newLdc);
-							il.delete(prev2);
-							il.delete(prev1);
-							il.delete(handle);
-							changesMade = true;
-						} catch (TargetLostException e) {
-							e.printStackTrace();
-						}
-					}
-				}
-			}
-			// Extend with additional cases (ISUB, IMUL, etc.) as needed.
+		if (replaceLoadsWithConstants(handles, cpgen, constantAssignments)) {
+			changed = true;
 		}
 
-		// Finalize the instruction list: reset positions and update stack/local sizes.
-		il.setPositions();
-		methodGen.setMaxStack();
-		methodGen.setMaxLocals();
-		return changesMade;
+		if (removeUnusedAssignments(il, constantAssignments)) {
+			changed = true;
+		}
+
+		if (changed) {
+			mg.setInstructionList(il);
+			mg.setMaxStack();
+			mg.setMaxLocals();
+		}
+
+		return changed;
+	}
+
+	// ------------------ Helper Methods ------------------
+
+	private void identifyConstantAssignments(InstructionHandle[] handles, ConstantPoolGen cpgen,
+			Map<Integer, ConstantInfo> assignments, Set<Integer> reassigns) {
+		for (int i = 0; i < handles.length - 1; i++) {
+			Instruction inst = handles[i].getInstruction();
+			Instruction next = handles[i + 1].getInstruction();
+
+			if (!(next instanceof StoreInstruction))
+				continue;
+			int index = ((StoreInstruction) next).getIndex();
+
+			if (assignments.containsKey(index)) {
+				reassigns.add(index);
+				continue;
+			}
+
+			ConstantInfo constInfo = extractConstantInfo(inst, cpgen);
+			if (constInfo != null) {
+				assignments.put(index, constInfo);
+			}
+		}
+	}
+
+	private ConstantInfo extractConstantInfo(Instruction inst, ConstantPoolGen cpgen) {
+		Number value = null;
+		Type type = null;
+
+		if (inst instanceof LDC) {
+			Object val = ((LDC) inst).getValue(cpgen);
+			if (val instanceof Integer) {
+				value = (Integer) val;
+				type = Type.INT;
+			} else if (val instanceof Float) {
+				value = (Float) val;
+				type = Type.FLOAT;
+			}
+		} else if (inst instanceof LDC2_W) {
+			Object val = ((LDC2_W) inst).getValue(cpgen);
+			if (val instanceof Double) {
+				value = (Double) val;
+				type = Type.DOUBLE;
+			} else if (val instanceof Long) {
+				value = (Long) val;
+				type = Type.LONG;
+			}
+		} else if (inst instanceof ConstantPushInstruction) {
+			value = ((ConstantPushInstruction) inst).getValue();
+			if (value instanceof Integer) {
+				type = Type.INT;
+			} else if (value instanceof Float) {
+				type = Type.FLOAT;
+			}
+		}
+
+		return (value != null && type != null) ? new ConstantInfo(value, type) : null;
+	}
+
+	private void removeReassignedVariables(Map<Integer, ConstantInfo> assignments, Set<Integer> reassigns) {
+		for (int index : reassigns) {
+			assignments.remove(index);
+		}
+	}
+
+	private boolean replaceLoadsWithConstants(InstructionHandle[] handles, ConstantPoolGen cpgen,
+			Map<Integer, ConstantInfo> assignments) {
+		boolean changed = false;
+
+		for (InstructionHandle handle : handles) {
+			Instruction inst = handle.getInstruction();
+			if (handle.hasTargeters() || !(inst instanceof LoadInstruction))
+				continue;
+
+			int index = ((LoadInstruction) inst).getIndex();
+			if (!assignments.containsKey(index))
+				continue;
+
+			Instruction replacement = createConstantLoad(assignments.get(index), cpgen);
+			if (replacement != null) {
+				handle.setInstruction(replacement);
+				changed = true;
+			}
+		}
+
+		return changed;
+	}
+
+	private Instruction createConstantLoad(ConstantInfo constInfo, ConstantPoolGen cpgen) {
+		switch (constInfo.type.toString()) {
+			case "int":
+				return new LDC(cpgen.addInteger(constInfo.value.intValue()));
+			case "float":
+				return new LDC(cpgen.addFloat(constInfo.value.floatValue()));
+			case "double":
+				return new LDC2_W(cpgen.addDouble(constInfo.value.doubleValue()));
+			case "long":
+				return new LDC2_W(cpgen.addLong(constInfo.value.longValue()));
+			default:
+				return null;
+		}
+	}
+
+	private boolean removeUnusedAssignments(InstructionList il, Map<Integer, ConstantInfo> assignments) {
+		boolean changed = false;
+
+		for (int index : new HashSet<>(assignments.keySet())) {
+			if (isVariableUsed(il, index))
+				continue;
+
+			InstructionHandle h = il.getStart();
+			while (h != null && h.getNext() != null) {
+				Instruction inst = h.getInstruction();
+				Instruction nextInst = h.getNext().getInstruction();
+
+				if (nextInst instanceof StoreInstruction && ((StoreInstruction) nextInst).getIndex() == index) {
+					InstructionHandle next = h.getNext().getNext();
+					try {
+						il.delete(h, h.getNext());
+						changed = true;
+					} catch (TargetLostException e) {
+						for (InstructionHandle target : e.getTargets()) {
+							for (InstructionTargeter t : target.getTargeters()) {
+								t.updateTarget(target, next);
+							}
+						}
+					}
+					break;
+				}
+				h = h.getNext();
+			}
+		}
+
+		return changed;
+	}
+
+	private boolean isVariableUsed(InstructionList il, int index) {
+		for (InstructionHandle h = il.getStart(); h != null; h = h.getNext()) {
+			Instruction inst = h.getInstruction();
+			if (inst instanceof LoadInstruction && ((LoadInstruction) inst).getIndex() == index) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// ------------------ Helper Class ------------------
+
+	class ConstantInfo {
+		public Number value;
+		public Type type;
+
+		public ConstantInfo(Number value, Type type) {
+			this.value = value;
+			this.type = type;
+		}
+
+		@Override
+		public String toString() {
+			return "{number: " + value + ", type: " + type + "}";
+		}
 	}
 
 	public void write(String optimisedFilePath) {
