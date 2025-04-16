@@ -97,8 +97,6 @@ public class ConstantFolder {
 
 			if (madeChanges) {
 				il.setPositions(true); // Update the positions after changes.
-				methodGen.setMaxStack();
-				methodGen.setMaxLocals();
 			}
 
 		} while (madeChanges);
@@ -364,6 +362,7 @@ public class ConstantFolder {
 	// ================== Helper Methods ==================
 
 	// === Constant specific====
+	//
 	private void identifyConstantAssignments(InstructionHandle[] handles, ConstantPoolGen cpgen,
 			Map<Integer, ConstantInfo> assignments, Set<Integer> reassigns) {
 		for (int i = 0; i < handles.length - 1; i++) {
