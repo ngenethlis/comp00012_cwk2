@@ -41,6 +41,7 @@ public class ConstantFolder {
 			this.parser = new ClassParser(classFilePath);
 			this.original = this.parser.parse();
 			this.gen = new ClassGen(this.original);
+			// get around stackmap errors
 			this.gen.setMajor(50);
 			this.gen.setMinor(0);
 		} catch (IOException e) {
@@ -49,12 +50,10 @@ public class ConstantFolder {
 	}
 
 	// This method performs constant folding optimization on the bytecode.
-
 	public void optimize() {
 		// Original Don't Delete
-		ClassGen cgen = new ClassGen(original); // I didn't use this shit at all
+		ClassGen cgen = new ClassGen(original);
 		ConstantPoolGen cpgen = gen.getConstantPool();
-		// Original Don't Delete
 
 		// Get all methods in the class
 		Method[] methods = gen.getMethods();
@@ -74,6 +73,7 @@ public class ConstantFolder {
 
 	private void processMethod(Method method, ConstantPoolGen cpgen) {
 		ClassGen cg = new ClassGen(original);
+		// get around stack map errors
 		cg.setMajor(50);
 		cg.setMinor(0);
 
@@ -97,7 +97,10 @@ public class ConstantFolder {
 
 			if (madeChanges) {
 				il.setPositions(true); // Update the positions after changes.
+				methodGen.setMaxStack();
+				methodGen.setMaxLocals();
 			}
+
 		} while (madeChanges);
 
 		// Remove debugging info so outdated stack maps are not used.
@@ -306,82 +309,61 @@ public class ConstantFolder {
 		if (removeUnusedAssignments(il, constantAssignments)) {
 			changed = true;
 		}
+		return changed;
+	}
 
-		if (changed) {
-			mg.setInstructionList(il);
-			mg.setMaxStack();
-			mg.setMaxLocals();
+	public boolean foldDynamicVariables(MethodGen mg) {
+		InstructionList il = mg.getInstructionList();
+		ConstantPoolGen cpgen = mg.getConstantPool();
+
+		if (il == null) {
+			return false;
+		}
+
+		boolean changed = false;
+		InstructionHandle[] handles = il.getInstructionHandles();
+		// Maps a local variable index to its current constant value.
+		Map<Integer, ConstantInfo> variableValues = new HashMap<>();
+
+		// Process instructions one by one.
+		for (int i = 0; i < handles.length; i++) {
+			InstructionHandle current = handles[i];
+			Instruction inst = current.getInstruction();
+
+			if (inst instanceof StoreInstruction) {
+				// For a store, check the previous instruction for a constant push.
+				int varIndex = ((StoreInstruction) inst).getIndex();
+				if (i > 0) {
+					Instruction prevInst = handles[i - 1].getInstruction();
+					ConstantInfo info = extractConstantInfo(prevInst, cpgen);
+					if (info != null) {
+						variableValues.put(varIndex, info);
+					} else {
+						variableValues.remove(varIndex);
+					}
+				} else {
+					// No preceding instruction -> clear any constant mapping.
+					variableValues.remove(varIndex);
+				}
+			} else if (inst instanceof LoadInstruction && !current.hasTargeters()) {
+				// For a load, if a constant is active for the variable, replace it.
+				int varIndex = ((LoadInstruction) inst).getIndex();
+				if (variableValues.containsKey(varIndex)) {
+					Instruction replacement = createConstantLoad(variableValues.get(varIndex), cpgen);
+					if (replacement != null) {
+						current.setInstruction(replacement);
+						changed = true;
+					}
+				}
+			}
 		}
 
 		return changed;
 	}
 
-	public boolean foldDynamicVariables(MethodGen mg) {
-    InstructionList il = mg.getInstructionList();
-    ConstantPoolGen cpgen = mg.getConstantPool();
-    if (il == null) return false;
-
-    boolean changed = false;
-    Map<Integer, ConstantInfo> currentConstants = new HashMap<>();
-    Set<Integer> invalidatedVars = new HashSet<>();
-
-    InstructionHandle[] handles = il.getInstructionHandles();
-
-    for (int i = 0; i < handles.length; i++) {
-        InstructionHandle handle = handles[i];
-        Instruction inst = handle.getInstruction();
-
-        // Handle store instructions
-        if (inst instanceof StoreInstruction) {
-			int varIndex = ((StoreInstruction) inst).getIndex();
-		
-			if (i > 0) {
-				Instruction prevInst = handles[i - 1].getInstruction();
-				ConstantInfo info = extractConstantInfo(prevInst, cpgen);
-				if (info != null) {
-					currentConstants.put(varIndex, info);
-				} else {
-					currentConstants.remove(varIndex);
-				}
-			} else {
-				currentConstants.remove(varIndex);
-			}
-		
-			invalidatedVars.add(varIndex);
-			currentConstants.remove(varIndex); 
-		}
-		
-
-        // Handle load instructions
-        if (inst instanceof LoadInstruction) {
-            int varIndex = ((LoadInstruction) inst).getIndex();
-
-            // Only replace if we *currently* have a valid known value
-            if (currentConstants.containsKey(varIndex) && !invalidatedVars.contains(varIndex)) {
-                Instruction replacement = createConstantLoad(currentConstants.get(varIndex), cpgen);
-                if (replacement != null) {
-                    handle.setInstruction(replacement);
-                    changed = true;
-                }
-            }
-        }
-    }
-
-    if (changed) {
-        il.setPositions();
-        mg.setInstructionList(il);
-        mg.setMaxStack();
-        mg.setMaxLocals();
-    }
-
-    return changed;
-}
-
-	
-	
-
 	// ================== Helper Methods ==================
 
+	// === Constant specific====
 	private void identifyConstantAssignments(InstructionHandle[] handles, ConstantPoolGen cpgen,
 			Map<Integer, ConstantInfo> assignments, Set<Integer> reassigns) {
 		for (int i = 0; i < handles.length - 1; i++) {
@@ -476,8 +458,6 @@ public class ConstantFolder {
 		return false;
 	}
 
-	/* ----------------- Helper Methods ----------------- */
-
 	/**
 	 * Extracts constant information from an instruction if it is a constant push.
 	 * This method recognizes:
@@ -522,8 +502,8 @@ public class ConstantFolder {
 	}
 
 	/**
-	 * Creates an instruction that loads the constant based on the type in the
-	 * ConstantInfo.
+	 * Creates an instruction that loads the constant based on the type
+	 * in helper class ConstantInfo.
 	 */
 	private Instruction createConstantLoad(ConstantInfo constInfo, ConstantPoolGen cpgen) {
 		// Using toString() of Type is one way to compare.
@@ -540,6 +520,48 @@ public class ConstantFolder {
 		return null;
 	}
 
+	// == Dynamic Specific helpers ==
+
+	/**
+	 * Checks a StoreInstruction at the given index.
+	 * if prev instruction pushes const, update mapping
+	 * Otherwise remove the variable from the mapping.
+	 */
+	private void processStoreInstruction(InstructionHandle[] handles, int i, ConstantPoolGen cpgen,
+			Map<Integer, ConstantInfo> variableValues) {
+		int index = ((StoreInstruction) handles[i].getInstruction()).getIndex();
+		if (i > 0) {
+			Instruction prevInst = handles[i - 1].getInstruction();
+			ConstantInfo info = extractConstantInfo(prevInst, cpgen);
+			if (info != null) {
+				variableValues.put(index, info);
+			} else {
+				variableValues.remove(index);
+			}
+		} else {
+			variableValues.remove(index);
+		}
+	}
+
+	/**
+	 * Checks a LoadInstruction.
+	 * If const val is active for var replace the load with a const load
+	 */
+	private boolean processLoadInstruction(InstructionHandle current, ConstantPoolGen cpgen,
+			Map<Integer, ConstantInfo> variableValues) {
+		int index = ((LoadInstruction) current.getInstruction()).getIndex();
+		if (variableValues.containsKey(index)) {
+			ConstantInfo info = variableValues.get(index);
+			Instruction replacement = createConstantLoad(info, cpgen);
+			if (replacement != null) {
+				current.setInstruction(replacement);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// write optimised file
 	public void write(String optimisedFilePath) {
 		this.optimize();
 
@@ -556,10 +578,7 @@ public class ConstantFolder {
 	}
 
 	// ============== Helper Class ================
-
-	/*
-	 * Helper class to hold a constant value and its type.
-	 */
+	// holds constant value and its type.
 	class ConstantInfo {
 		public Number value;
 		public Type type;
