@@ -20,8 +20,6 @@ import org.apache.bcel.util.InstructionFinder;
 import org.apache.bcel.classfile.Attribute;
 import org.apache.bcel.classfile.StackMapTable;
 
-import org.apache.bcel.generic.InstructionFactory;
-
 public class ConstantFolder {
 	ClassParser parser = null;
 	ClassGen gen = null;
@@ -319,66 +317,68 @@ public class ConstantFolder {
 	}
 
 	public boolean foldDynamicVariables(MethodGen mg) {
-		InstructionList il = mg.getInstructionList();
-		ConstantPoolGen cpgen = mg.getConstantPool();
+    InstructionList il = mg.getInstructionList();
+    ConstantPoolGen cpgen = mg.getConstantPool();
+    if (il == null) return false;
 
-		if (il == null)
-			return false;
+    boolean changed = false;
+    Map<Integer, ConstantInfo> currentConstants = new HashMap<>();
+    Set<Integer> invalidatedVars = new HashSet<>();
 
-		boolean changed = false;
-		// This map holds the current constant value of each variable (if known) for its
-		// current interval.
-		Map<Integer, ConstantInfo> currentConstants = new HashMap<>();
-		InstructionHandle[] handles = il.getInstructionHandles();
+    InstructionHandle[] handles = il.getInstructionHandles();
 
-		// Process the instruction list sequentially.
-		for (int i = 0; i < handles.length; i++) {
-			InstructionHandle handle = handles[i];
-			Instruction inst = handle.getInstruction();
+    for (int i = 0; i < handles.length; i++) {
+        InstructionHandle handle = handles[i];
+        Instruction inst = handle.getInstruction();
 
-			// Detect store instructions and update the mapping.
-			if (inst instanceof StoreInstruction) {
-				int varIndex = ((StoreInstruction) inst).getIndex();
-				// Check if there is a constant push immediately before the store.
-				if (i > 0) {
-					Instruction prevInst = handles[i - 1].getInstruction();
-					ConstantInfo info = extractConstantInfo(prevInst, cpgen);
-					if (info != null) {
-						// Constant assignment found: set new constant for the variable.
-						currentConstants.put(varIndex, info);
-					} else {
-						// If the store is not assigned using a constant push, clear any previous
-						// constant.
-						currentConstants.remove(varIndex);
-					}
+        // Handle store instructions
+        if (inst instanceof StoreInstruction) {
+			int varIndex = ((StoreInstruction) inst).getIndex();
+		
+			if (i > 0) {
+				Instruction prevInst = handles[i - 1].getInstruction();
+				ConstantInfo info = extractConstantInfo(prevInst, cpgen);
+				if (info != null) {
+					currentConstants.put(varIndex, info);
 				} else {
-					// No previous instruction? Clear any mapping.
 					currentConstants.remove(varIndex);
 				}
+			} else {
+				currentConstants.remove(varIndex);
 			}
-			// Process load instructions and propagate the dynamic constant if present.
-			else if (inst instanceof LoadInstruction) {
-				int varIndex = ((LoadInstruction) inst).getIndex();
-				if (currentConstants.containsKey(varIndex)) {
-					Instruction replacement = createConstantLoad(currentConstants.get(varIndex), cpgen);
-					if (replacement != null) {
-						handle.setInstruction(replacement);
-						changed = true;
-					}
-				}
-			}
+		
+			invalidatedVars.add(varIndex);
+			currentConstants.remove(varIndex); 
 		}
+		
 
-		if (changed) {
-			il.setPositions();
-			mg.setInstructionList(il);
-			mg.setMaxStack();
-			mg.setMaxLocals();
-			Method updatedMethod = mg.getMethod();
-		}
+        // Handle load instructions
+        if (inst instanceof LoadInstruction) {
+            int varIndex = ((LoadInstruction) inst).getIndex();
 
-		return changed;
-	}
+            // Only replace if we *currently* have a valid known value
+            if (currentConstants.containsKey(varIndex) && !invalidatedVars.contains(varIndex)) {
+                Instruction replacement = createConstantLoad(currentConstants.get(varIndex), cpgen);
+                if (replacement != null) {
+                    handle.setInstruction(replacement);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if (changed) {
+        il.setPositions();
+        mg.setInstructionList(il);
+        mg.setMaxStack();
+        mg.setMaxLocals();
+    }
+
+    return changed;
+}
+
+	
+	
 
 	// ================== Helper Methods ==================
 
